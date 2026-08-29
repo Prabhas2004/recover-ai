@@ -1,0 +1,8 @@
+﻿{
+  "id": "pay_bank_decline_test",
+  "customer": "Test Customer",
+  "amount": 999,
+  "failure": "Your payment didn't go through as it was declined by the bank. Try another payment method or contact your bank.",
+  "attempts": 0,
+  "status": "AT_RISK"
+}

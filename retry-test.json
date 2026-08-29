@@ -1,0 +1,8 @@
+{
+  "id": "pay_temporary_test",
+  "customer": "Test Customer",
+  "amount": 999,
+  "failure": "Temporary bank network error. Try again later.",
+  "attempts": 0,
+  "status": "AT_RISK"
+}
