@@ -87,11 +87,16 @@ export default function Home() {
   const [payments, setPayments] = useState<Payment[]>(DEMO_PAYMENTS);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [recovery, setRecovery] = useState<RecoveryResult | null>(null);
+
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
+
   const [batchComplete, setBatchComplete] = useState(false);
   const [toast, setToast] = useState("");
   const [apiConnected, setApiConnected] = useState(false);
+
+  const [lastUpdated, setLastUpdated] = useState<string>("");
 
   const revenueAtRisk = useMemo(
     () =>
@@ -121,7 +126,10 @@ export default function Home() {
     (p) => p.status === "AT_RISK"
   ).length;
 
-  const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
+  const totalAmount = payments.reduce(
+    (sum, p) => sum + p.amount,
+    0
+  );
 
   const recoveryRate =
     totalAmount > 0
@@ -142,9 +150,16 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  async function loadPayments() {
+  async function loadPayments(showRefreshState = false) {
+    if (showRefreshState) {
+      setRefreshing(true);
+    }
+
     try {
-      const response = await fetch("/api/payments");
+      const response = await fetch("/api/payments", {
+        method: "GET",
+        cache: "no-store",
+      });
 
       if (!response.ok) {
         throw new Error("Payments API failed");
@@ -157,16 +172,24 @@ export default function Home() {
       if (data.success && data.payments?.length > 0) {
         const formatted: Payment[] = data.payments.map(
           (payment: any, index: number) => ({
-            id: payment.id || `pay_${String(index + 1).padStart(3, "0")}`,
+            id:
+              payment.id ||
+              `pay_${String(index + 1).padStart(3, "0")}`,
+
             customer:
               payment.customer?.name ||
               payment.description ||
               "Razorpay Customer",
-            amount: Math.round((payment.amount || 0) / 100),
+
+            amount: Math.round(
+              (payment.amount || 0) / 100
+            ),
+
             failure:
               payment.error_description ||
               payment.error_reason ||
               "Payment requires attention",
+
             attempts: 0,
             probability: 70,
             strategy: "Analyze payment",
@@ -176,10 +199,29 @@ export default function Home() {
 
         setPayments(formatted);
       }
+
+      setLastUpdated(new Date().toISOString());
+
+      if (showRefreshState) {
+        setToast("Dashboard data refreshed.");
+      }
     } catch (error) {
       console.log("Using demo payments:", error);
+
       setApiConnected(false);
       setPayments(DEMO_PAYMENTS);
+
+      setLastUpdated(new Date().toISOString());
+
+      if (showRefreshState) {
+        setToast(
+          "Live payment data unavailable. Showing demo data."
+        );
+      }
+    } finally {
+      if (showRefreshState) {
+        setRefreshing(false);
+      }
     }
   }
 
@@ -213,12 +255,14 @@ export default function Home() {
           {
             step: "POLICY_VALIDATION",
             timestamp,
-            message: "Action approved by Recovery Policy Engine.",
+            message:
+              "Action approved by Recovery Policy Engine.",
           },
           {
             step: "RECOVERY_EXECUTED",
             timestamp,
-            message: "Recovery action executed successfully in sandbox.",
+            message:
+              "Recovery action executed successfully in sandbox.",
           },
         ],
       });
@@ -245,7 +289,8 @@ export default function Home() {
           {
             step: "POLICY_VALIDATION",
             timestamp,
-            message: "Recovery action is ready for policy validation.",
+            message:
+              "Recovery action is ready for policy validation.",
           },
         ],
       });
@@ -269,7 +314,9 @@ export default function Home() {
       const data: RecoveryResult = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.reason || "Recovery failed");
+        throw new Error(
+          data.reason || "Recovery failed"
+        );
       }
 
       setRecovery(data);
@@ -307,7 +354,8 @@ export default function Home() {
         status: "ESCALATED",
         probability: payment.probability,
         strategy: "Manual verification",
-        reason: "Recovery service could not complete the action.",
+        reason:
+          "Recovery service could not complete the action.",
       });
     } finally {
       setLoading(false);
@@ -318,20 +366,25 @@ export default function Home() {
     setBatchLoading(true);
 
     try {
-      const response = await fetch("/api/recovery/batch", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          payments,
-        }),
-      });
+      const response = await fetch(
+        "/api/recovery/batch",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            payments,
+          }),
+        }
+      );
 
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error("Batch recovery failed");
+        throw new Error(
+          "Batch recovery failed"
+        );
       }
 
       setBatchComplete(true);
@@ -347,11 +400,6 @@ export default function Home() {
         )} recovered.`
       );
 
-      /*
-       * The demo batch result represents pay_001 as recovered.
-       * This keeps the frontend state synchronized with
-       * the batch result returned by the recovery API.
-       */
       setPayments((current) =>
         current.map((payment, index) =>
           index === 0
@@ -365,7 +413,9 @@ export default function Home() {
     } catch (error) {
       console.error(error);
 
-      setToast("Batch recovery could not be completed.");
+      setToast(
+        "Batch recovery could not be completed."
+      );
     } finally {
       setBatchLoading(false);
     }
@@ -377,16 +427,37 @@ export default function Home() {
     setRecovery(null);
     setBatchComplete(false);
     setToast("");
+    setApiConnected(false);
+    setLastUpdated(new Date().toISOString());
+  }
+
+  function formatLastUpdated() {
+    if (!lastUpdated) {
+      return "Not updated yet";
+    }
+
+    return new Date(lastUpdated).toLocaleTimeString(
+      "en-IN",
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }
+    );
   }
 
   return (
     <main className="min-h-screen bg-[#020617] text-white">
+
       {/* HEADER */}
       <header className="border-b border-slate-800 bg-[#020617]">
         <div className="mx-auto max-w-[1500px] px-6 py-5">
+
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+
             <div>
               <div className="flex items-center gap-3">
+
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-xl font-bold">
                   R
                 </div>
@@ -400,6 +471,7 @@ export default function Home() {
                     AI Revenue Recovery Agent
                   </p>
                 </div>
+
               </div>
 
               <div className="mt-3 text-sm text-blue-300">
@@ -407,7 +479,9 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+
+              {/* CONNECTION STATUS */}
               <span
                 className={`rounded-full px-3 py-1 text-xs ${
                   apiConnected
@@ -420,6 +494,24 @@ export default function Home() {
                   : "● DEMO MODE"}
               </span>
 
+              {/* LAST UPDATED */}
+              <span className="text-xs text-slate-500">
+                Updated {formatLastUpdated()}
+              </span>
+
+              {/* REFRESH */}
+              <button
+                type="button"
+                onClick={() => loadPayments(true)}
+                disabled={refreshing}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {refreshing
+                  ? "↻ Refreshing..."
+                  : "↻ Refresh"}
+              </button>
+
+              {/* RESET DEMO */}
               <button
                 type="button"
                 onClick={resetDemo}
@@ -427,14 +519,18 @@ export default function Home() {
               >
                 Reset Demo
               </button>
+
             </div>
+
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-[1500px] px-6 py-6">
+
         {/* TOP METRICS */}
         <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+
           <MetricCard
             title="Revenue At Risk"
             value={`₹${formatNumber(revenueAtRisk)}`}
@@ -458,12 +554,15 @@ export default function Home() {
             value={String(escalatedCount)}
             description="Safely stopped"
           />
+
         </section>
 
         {/* MAIN WORKSPACE */}
         <section className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-[1fr_0.72fr]">
+
           {/* PAYMENTS */}
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#111a2e]">
+
             <div className="border-b border-slate-800 p-5">
               <h2 className="text-lg font-bold">
                 Revenue At Risk
@@ -479,17 +578,28 @@ export default function Home() {
                 <PaymentRow
                   key={payment.id}
                   payment={payment}
-                  selected={selectedPayment?.id === payment.id}
-                  onAnalyze={() => analyzePayment(payment)}
-                  onRecover={() => runRecovery(payment)}
-                  loading={loading && selectedPayment?.id === payment.id}
+                  selected={
+                    selectedPayment?.id === payment.id
+                  }
+                  onAnalyze={() =>
+                    analyzePayment(payment)
+                  }
+                  onRecover={() =>
+                    runRecovery(payment)
+                  }
+                  loading={
+                    loading &&
+                    selectedPayment?.id === payment.id
+                  }
                 />
               ))}
             </div>
+
           </div>
 
           {/* DECISION CENTER */}
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#111a2e]">
+
             <div className="border-b border-slate-800 p-5">
               <h2 className="text-lg font-bold">
                 AI Decision Center
@@ -501,6 +611,7 @@ export default function Home() {
             </div>
 
             <div className="min-h-[650px] p-6">
+
               {!selectedPayment ? (
                 <EmptyDecision />
               ) : (
@@ -508,18 +619,25 @@ export default function Home() {
                   payment={selectedPayment}
                   recovery={recovery}
                   loading={loading}
-                  onRecover={() => runRecovery(selectedPayment)}
+                  onRecover={() =>
+                    runRecovery(selectedPayment)
+                  }
                 />
               )}
+
             </div>
           </div>
+
         </section>
 
         {/* BATCH RECOVERY */}
         <section className="mt-6 overflow-hidden rounded-2xl border border-blue-900/70 bg-[#081229]">
+
           <div className="flex flex-col gap-5 p-6 md:flex-row md:items-center md:justify-between">
+
             <div>
               <div className="flex items-center gap-3">
+
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-950 text-xl">
                   ⚡
                 </div>
@@ -527,6 +645,7 @@ export default function Home() {
                 <h2 className="text-xl font-bold">
                   Batch Revenue Recovery
                 </h2>
+
               </div>
 
               <p className="mt-2 text-slate-400">
@@ -545,13 +664,16 @@ export default function Home() {
                 ? "Processing..."
                 : "⚡ Run Batch Recovery"}
             </button>
+
           </div>
         </section>
 
         {/* BATCH RESULT */}
         {batchComplete && (
           <section className="mt-6 rounded-2xl border border-slate-800 bg-[#111a2e] p-6">
+
             <div className="flex items-center justify-between">
+
               <div>
                 <h2 className="text-xl font-bold">
                   Batch Recovery Result
@@ -565,9 +687,11 @@ export default function Home() {
               <span className="rounded-full bg-emerald-950 px-4 py-2 text-sm text-emerald-400">
                 BATCH COMPLETE
               </span>
+
             </div>
 
             <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+
               <MetricBox
                 title="Payments Processed"
                 value={String(payments.length)}
@@ -587,9 +711,11 @@ export default function Home() {
                 title="Recovery Rate"
                 value={`${recoveryRate}%`}
               />
+
             </div>
 
             <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+
               <StatusBox
                 title="RECOVERED"
                 value={recoveredCount}
@@ -607,27 +733,48 @@ export default function Home() {
                 value={escalatedCount}
                 type="danger"
               />
+
             </div>
 
             {/* TABLE */}
             <div className="mt-7 overflow-x-auto">
+
               <table className="w-full min-w-[800px]">
+
                 <thead>
                   <tr className="border-b border-slate-800 text-left text-sm text-slate-500">
-                    <th className="px-3 py-4">PAYMENT</th>
-                    <th className="px-3 py-4">CUSTOMER</th>
-                    <th className="px-3 py-4">AMOUNT</th>
-                    <th className="px-3 py-4">AI DECISION</th>
-                    <th className="px-3 py-4">RESULT</th>
+
+                    <th className="px-3 py-4">
+                      PAYMENT
+                    </th>
+
+                    <th className="px-3 py-4">
+                      CUSTOMER
+                    </th>
+
+                    <th className="px-3 py-4">
+                      AMOUNT
+                    </th>
+
+                    <th className="px-3 py-4">
+                      AI DECISION
+                    </th>
+
+                    <th className="px-3 py-4">
+                      RESULT
+                    </th>
+
                   </tr>
                 </thead>
 
                 <tbody>
+
                   {payments.map((payment) => (
                     <tr
                       key={payment.id}
                       className="border-b border-slate-800/70"
                     >
+
                       <td className="px-3 py-5 font-semibold">
                         {payment.id}
                       </td>
@@ -645,19 +792,28 @@ export default function Home() {
                       </td>
 
                       <td className="px-3 py-5">
-                        <StatusBadge status={payment.status} />
+                        <StatusBadge
+                          status={payment.status}
+                        />
                       </td>
+
                     </tr>
                   ))}
+
                 </tbody>
+
               </table>
+
             </div>
+
           </section>
         )}
 
         {/* AUDIT TRAIL */}
         <section className="mt-6 rounded-2xl border border-slate-800 bg-[#111a2e] p-6">
+
           <div className="flex items-center justify-between">
+
             <div>
               <h2 className="text-xl font-bold">
                 Recovery Audit Trail
@@ -671,17 +827,21 @@ export default function Home() {
             <span className="rounded-full bg-blue-950 px-4 py-2 text-sm text-blue-400">
               {recovery?.audit?.length || 4} EVENTS
             </span>
+
           </div>
 
           <div className="mt-6 space-y-4">
-            {recovery?.audit?.map((event, index) => (
-              <AuditItem
-                key={index}
-                step={event.step}
-                message={event.message}
-                timestamp={event.timestamp}
-              />
-            ))}
+
+            {recovery?.audit?.map(
+              (event, index) => (
+                <AuditItem
+                  key={index}
+                  step={event.step}
+                  message={event.message}
+                  timestamp={event.timestamp}
+                />
+              )
+            )}
 
             {!recovery?.audit && (
               <>
@@ -706,18 +866,23 @@ export default function Home() {
                 />
               </>
             )}
+
           </div>
         </section>
+
       </div>
 
       {/* TOAST */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 rounded-xl border border-slate-700 bg-[#111a2e] px-6 py-4 shadow-2xl">
+
           <div className="font-semibold text-white">
             {toast}
           </div>
+
         </div>
       )}
+
     </main>
   );
 }
@@ -737,13 +902,19 @@ function MetricCard({
 }) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-[#111a2e] p-5">
-      <p className="text-sm text-slate-400">{title}</p>
 
-      <p className="mt-3 text-2xl font-bold">{value}</p>
+      <p className="text-sm text-slate-400">
+        {title}
+      </p>
+
+      <p className="mt-3 text-2xl font-bold">
+        {value}
+      </p>
 
       <p className="mt-1 text-xs text-slate-500">
         {description}
       </p>
+
     </div>
   );
 }
@@ -767,12 +938,21 @@ function PaymentRow({
         selected ? "bg-blue-950/20" : ""
       }`}
     >
-      <div className="flex items-start justify-between gap-5">
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="font-bold">{payment.id}</span>
 
-            <StatusBadge status={payment.status} />
+      <div className="flex items-start justify-between gap-5">
+
+        <div>
+
+          <div className="flex items-center gap-3">
+
+            <span className="font-bold">
+              {payment.id}
+            </span>
+
+            <StatusBadge
+              status={payment.status}
+            />
+
           </div>
 
           <p className="mt-2 text-sm text-blue-300">
@@ -782,9 +962,11 @@ function PaymentRow({
           <p className="mt-2 text-sm text-slate-400">
             {payment.failure}
           </p>
+
         </div>
 
         <div className="text-right">
+
           <p className="font-bold">
             ₹{formatNumber(payment.amount)}
           </p>
@@ -792,10 +974,13 @@ function PaymentRow({
           <p className="mt-2 text-sm text-blue-400">
             {payment.probability}% recovery probability
           </p>
+
         </div>
+
       </div>
 
       <div className="mt-4 flex gap-2">
+
         <button
           type="button"
           onClick={onAnalyze}
@@ -808,7 +993,8 @@ function PaymentRow({
           type="button"
           onClick={onRecover}
           disabled={
-            loading || payment.status === "RECOVERED"
+            loading ||
+            payment.status === "RECOVERED"
           }
           className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold transition hover:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -818,7 +1004,9 @@ function PaymentRow({
             ? "Already Recovered"
             : "Run Recovery"}
         </button>
+
       </div>
+
     </div>
   );
 }
@@ -826,13 +1014,15 @@ function PaymentRow({
 function EmptyDecision() {
   return (
     <div className="flex min-h-[550px] flex-col items-center justify-center text-center">
+
       <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-slate-700 text-2xl text-slate-500">
-        ◎
+        ◉
       </div>
 
       <p className="text-slate-500">
         Select a payment to inspect the decision.
       </p>
+
     </div>
   );
 }
@@ -854,6 +1044,7 @@ function DecisionPanel({
 
   return (
     <div>
+
       <p className="text-sm uppercase tracking-wider text-slate-500">
         PAYMENT
       </p>
@@ -863,46 +1054,59 @@ function DecisionPanel({
       </h2>
 
       <div className="mt-10">
+
         <div className="flex items-end justify-between">
+
           <span className="text-slate-400">
             Recovery Probability
           </span>
 
           <span className="text-4xl font-bold">
-            {recovery?.probability || payment.probability}%
+            {recovery?.probability ||
+              payment.probability}
+            %
           </span>
+
         </div>
 
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-800">
+
           <div
             className="h-full rounded-full bg-blue-500 transition-all"
             style={{
               width: `${
-                recovery?.probability || payment.probability
+                recovery?.probability ||
+                payment.probability
               }%`,
             }}
           />
+
         </div>
+
       </div>
 
       {/* RECOMMENDED ACTION */}
       <div className="mt-8 rounded-2xl border border-slate-700 bg-[#020617] p-5">
+
         <p className="text-sm uppercase tracking-wider text-blue-400">
           RECOMMENDED ACTION
         </p>
 
         <h3 className="mt-4 text-xl font-bold">
-          {recovery?.strategy || payment.strategy}
+          {recovery?.strategy ||
+            payment.strategy}
         </h3>
 
         <p className="mt-2 text-sm leading-6 text-slate-500">
           Selected by the Recovery Agent based on payment failure
           context and recovery probability.
         </p>
+
       </div>
 
       {/* AI REASONING */}
       <div className="mt-8">
+
         <p className="text-lg text-slate-400">
           AI Reasoning
         </p>
@@ -911,6 +1115,7 @@ function DecisionPanel({
           {recovery?.reason ||
             "Recovery Agent is analyzing the payment failure context and selecting the safest recovery strategy."}
         </p>
+
       </div>
 
       {/* POLICY ENGINE */}
@@ -921,7 +1126,9 @@ function DecisionPanel({
             : "border-slate-800 bg-[#020617]"
         }`}
       >
+
         <div className="flex items-center justify-between">
+
           <p className="text-sm uppercase tracking-wider text-slate-400">
             POLICY ENGINE
           </p>
@@ -929,6 +1136,7 @@ function DecisionPanel({
           <p className="text-sm uppercase tracking-wider text-slate-500">
             SAFETY CHECK
           </p>
+
         </div>
 
         {isRecovered ? (
@@ -954,6 +1162,7 @@ function DecisionPanel({
             </p>
           </>
         )}
+
       </div>
 
       {/* ACTION BUTTON */}
@@ -978,6 +1187,7 @@ function DecisionPanel({
         Every automated action is validated by the policy engine
         before execution.
       </p>
+
     </div>
   );
 }
@@ -991,9 +1201,15 @@ function MetricBox({
 }) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-[#020617] p-5">
-      <p className="text-sm text-slate-500">{title}</p>
 
-      <p className="mt-4 text-2xl font-bold">{value}</p>
+      <p className="text-sm text-slate-500">
+        {title}
+      </p>
+
+      <p className="mt-4 text-2xl font-bold">
+        {value}
+      </p>
+
     </div>
   );
 }
@@ -1010,8 +1226,10 @@ function StatusBox({
   const styles = {
     success:
       "border-emerald-900 bg-emerald-950/20 text-emerald-400",
+
     pending:
       "border-yellow-900 bg-yellow-950/20 text-yellow-400",
+
     danger:
       "border-red-900 bg-red-950/20 text-red-400",
   };
@@ -1020,9 +1238,15 @@ function StatusBox({
     <div
       className={`rounded-2xl border p-5 ${styles[type]}`}
     >
-      <p className="text-sm">{title}</p>
 
-      <p className="mt-4 text-3xl font-bold">{value}</p>
+      <p className="text-sm">
+        {title}
+      </p>
+
+      <p className="mt-4 text-3xl font-bold">
+        {value}
+      </p>
+
     </div>
   );
 }
@@ -1066,13 +1290,17 @@ function AuditItem({
 }) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-[#020617] p-5">
+
       <div className="flex items-start gap-5">
+
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-950 text-xl text-emerald-400">
           ✓
         </div>
 
         <div>
+
           <div className="flex flex-wrap items-center gap-3">
+
             <h3 className="font-bold">
               {step.replaceAll("_", " ")}
             </h3>
@@ -1082,13 +1310,17 @@ function AuditItem({
                 {formatTime(timestamp)}
               </span>
             )}
+
           </div>
 
           <p className="mt-3 text-slate-400">
             {message}
           </p>
+
         </div>
+
       </div>
+
     </div>
   );
 }
@@ -1105,11 +1337,14 @@ function formatNumber(value: number) {
 
 function formatTime(timestamp: string) {
   try {
-    return new Date(timestamp).toLocaleTimeString("en-IN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
+    return new Date(timestamp).toLocaleTimeString(
+      "en-IN",
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }
+    );
   } catch {
     return timestamp;
   }
